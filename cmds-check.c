@@ -3892,6 +3892,7 @@ out:
 #define NBYTES_ERROR		(1<<11)	/* INODE_ITEM nbytes count error */
 #define ISIZE_ERROR		(1<<12)	/* INODE_ITEM size count error */
 #define ORPHAN_ITEM		(1<<13) /* INODE_ITEM no reference */
+#define NO_INODE_ITEM		(1<<14) /* no inode_item */
 #define LAST_ITEM		(1<<15)	/* Complete this tree traversal */
 
 /*
@@ -4722,6 +4723,81 @@ out:
 		}
 	}
 
+	return err;
+}
+
+/*
+ * Iterate all item on the tree and call check_inode_item() to check.
+ *
+ * @root:	the root of the tree to be checked.
+ * @ext_ref:	the EXTENDED_IREF feature
+ *
+ * Return 0 if no error found.
+ */
+static int check_fs_root_v2(struct btrfs_root *root, unsigned int ext_ref)
+{
+	struct btrfs_path *path;
+	struct btrfs_key key;
+	u64 inode_id;
+	int ret, err = 0;
+
+	path = btrfs_alloc_path();
+	if (!path)
+		return -ENOMEM;
+
+	key.objectid = 0;
+	key.type = 0;
+	key.offset = 0;
+
+	ret = btrfs_search_slot(NULL, root, &key, path, 0, 0);
+	if (ret < 0) {
+		err = ret;
+		goto out;
+	}
+
+	while (1) {
+		btrfs_item_key_to_cpu(path->nodes[0], &key, path->slots[0]);
+
+		/*
+		 * All check must start with inode item, skip if not
+		 */
+		if (btrfs_key_type(&key) == BTRFS_INODE_ITEM_KEY) {
+			ret = check_inode_item(root, path, ext_ref);
+			if (ret == -EIO)
+				goto out;
+			err |= ret;
+			if (err & LAST_ITEM)
+				goto out;
+		} else {
+			error(
+			"root %llu ITEM[%llu %u %llu] isn't INODE_ITEM, skip to next inode",
+			root->objectid, key.objectid, key.type, key.offset);
+			goto skip;
+		}
+
+		continue;
+
+skip:
+		err |= NO_INODE_ITEM;
+		inode_id = key.objectid;
+
+		/* skip to next inode */
+		do {
+			ret = btrfs_next_item(root, path);
+			if (ret > 0) {
+				goto out;
+			} else if (ret < 0) {
+				err = ret;
+				goto out;
+			}
+			btrfs_item_key_to_cpu(path->nodes[0], &key,
+					      path->slots[0]);
+		} while (inode_id == key.objectid);
+	}
+
+out:
+	err &= ~LAST_ITEM;
+	btrfs_free_path(path);
 	return err;
 }
 
