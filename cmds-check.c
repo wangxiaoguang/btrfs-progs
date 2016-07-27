@@ -10373,7 +10373,11 @@ static int check_extent_item(struct btrfs_fs_info *fs_info,
 	}
 	end = (unsigned long)ei + item_size;
 
-	if (ptr >= end) {
+	if (ptr == end) {
+		goto out;
+	} else if (ptr > end) {
+		error("bad extent item [%llu %u %llu] size wrong",
+		      key.objectid, key.type, key.offset);
 		err |= ITEM_SIZE_MISMATCH;
 		goto out;
 	}
